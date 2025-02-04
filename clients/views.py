@@ -10,7 +10,7 @@ from rest_framework_simplejwt.authentication import JWTAuthentication
 from rest_framework import filters
 from rest_framework.pagination import PageNumberPagination
 from datetime import datetime, timedelta
-from django.db.models import Count
+from django.db.models import Count,Sum
 from django.db.models.functions import TruncDay,TruncMonth
 from rest_framework.views import APIView
 from django.utils.timezone import now
@@ -111,3 +111,231 @@ class ClientRAPIView(RetrieveDestroyAPIView):
                 "message": "Error",
                 "errors": ["Bunday chat_id ga iye paydalaniwshi tabilmadi"]
             }, status=status.HTTP_404_NOT_FOUND) 
+
+
+class ClientYearGet(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAdminUser]
+    
+
+    def get(self, request):
+        year = request.GET.get('year')
+        data_type = request.GET.get('type')
+
+        if not year:
+            return Response(
+                {'message': 'error', 'errors': ['Year is required']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if data_type not in ['amount', 'count']:
+            return Response(
+                {'message': 'error', 'errors': ['Invalid type parameter. Use "amount" or "count".']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+
+        try:
+            start_date = datetime(int(year), 1, 1)
+            end_date = datetime(int(year) + 1, 1, 1)
+
+            if data_type == 'amount':
+                total_amount = Client.objects.filter(
+                    created_at__gte=start_date,
+                    created_at__lt=end_date,
+                    is_finished=True,
+                ).aggregate(total=Sum('price'))['total'] or 0
+
+                result = {'date': year, 'total': total_amount}
+
+            else:  # data_type == 'count'
+                total_count = Client.objects.filter(
+                    created_at__gte=start_date,
+                    created_at__lt=end_date,
+                    is_finished=True,
+                ).aggregate(count=Count('id'))['count'] or 0
+                result = {'date': year, 'total': total_count}
+
+           
+            return Response(
+                {'data':result},
+                status=status.HTTP_200_OK
+            )
+
+        except ValueError:
+            return Response(
+                {'message': 'error', 'errors': ['Invalid year format']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+class ClientMonthGet(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        year = request.GET.get('year')
+        data_type = request.GET.get('type') 
+
+        if not year:
+            return Response(
+                {'message': 'error', 'errors': ['Year is required']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if data_type not in ['amount', 'count']:
+            return Response(
+                {'message': 'error', 'errors': ['Invalid type parameter. Use "amount" or "count".']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+
+        try:
+            start_date = datetime(int(year), 1, 1)
+            end_date = datetime(int(year) + 1, 1, 1)
+
+            monthly_data = []
+            for month in range(1, 13):
+                start_of_month = datetime(int(year), month, 1)
+                end_of_month = datetime(int(year), month + 1, 1) if month != 12 else end_date
+
+                if data_type == 'amount':
+                    total_amount = Client.objects.filter(
+                        created_at__gte=start_of_month,
+                        created_at__lt=end_of_month,
+                        is_finished=True,
+                    ).aggregate(total=Sum('price'))['total'] or 0
+        
+                    monthly_data.append({'date': month, 'total': total_amount})
+
+                else:  # data_type == 'count'
+                    total_count = Client.objects.filter(
+                        created_at__gte=start_of_month,
+                        created_at__lt=end_of_month,
+                        is_finished=True,
+                    ).aggregate(count=Count('id'))['count'] or 0
+
+                    monthly_data.append({'date': month, 'total': total_count})
+
+            return Response(
+                {'data':  monthly_data},
+                status=status.HTTP_200_OK
+            )
+
+        except ValueError:
+            return Response(
+                {'message': 'error', 'errors': ['Invalid year format']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+class ClientDayGet(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        year = request.GET.get('year')  
+        month = request.GET.get('month') 
+        data_type = request.GET.get('type')  
+
+        if not year or not month:
+            return Response(
+                {'message': 'error', 'errors': ['Year and Month are required']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        if data_type not in ['amount', 'count']:
+            return Response(
+                {'message': 'error', 'errors': ['Invalid type parameter. Use "amount" or "count".']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        
+        
+
+        try:
+            start_date = datetime(int(year), int(month), 1)
+
+            if int(month) == 12:
+                end_date = datetime(int(year) + 1, 1, 1)
+            else:
+                end_date = datetime(int(year), int(month) + 1, 1)
+
+            num_days = (end_date - start_date).days
+
+            results = []
+
+            for i in range(num_days):
+                day = start_date + timedelta(days=i)
+                day_end = day + timedelta(days=1)
+
+                if data_type == 'amount':
+                
+                    total_amount = Client.objects.filter(
+                        created_at__gte=day,
+                        created_at__lt=day_end,
+                        is_finished=True,
+                    ).aggregate(total=Sum('price'))['total'] or 0
+                
+                    result = {'date': int(day.strftime('%d')), 'total': total_amount}
+
+                else:  # data_type == 'count'
+                    total_count = Client.objects.filter(
+                        created_at__gte=day,
+                        created_at__lt=day_end,
+                        is_finished=True,
+                    ).aggregate(count=Count('id'))['count'] or 0
+
+                    result = {'date': int(day.strftime('%d')), 'total': total_count}
+
+                results.append(result)
+
+            return Response(
+                {'data': results},
+                status=status.HTTP_200_OK
+            )
+
+        except ValueError:
+            return Response(
+                {'message': 'error', 'errors': ['Invalid year or month format']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+class ClientTodayGet(APIView):
+    authentication_classes = [JWTAuthentication]
+    permission_classes = [IsAdminUser]
+
+    def get(self, request):
+        today = datetime.today()
+
+        year = request.GET.get('year', today.year)
+  
+        try:
+            start_date = datetime(int(year), today.month, today.day) 
+            end_date = start_date + timedelta(days=1) 
+
+        
+            total_amount_uzs = Client.objects.filter(
+                created_at__gte=start_date,
+                created_at__lt=end_date,
+                is_finished=True,
+            ).aggregate(total=Sum('price'))['total'] or 0
+
+           
+
+        
+            total_count = Client.objects.filter(
+                created_at__gte=start_date,
+                created_at__lt=end_date,
+                is_finished=True,
+            ).aggregate(count=Count('id'))['count'] or 0
+
+            result = {'date': today.strftime('%Y-%m-%d'),'total_amount':total_amount_uzs, 'total_count': total_count}
+
+            return Response(
+                {'data': result},
+                status=status.HTTP_200_OK
+            )
+        except ValueError:
+            return Response(
+                {'message': 'error', 'errors': ['Invalid date format']},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+       
