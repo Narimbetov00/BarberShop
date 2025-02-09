@@ -14,7 +14,24 @@ from django.db.models import Count,Sum
 from django.db.models.functions import TruncDay,TruncMonth
 from rest_framework.views import APIView
 from django.utils.timezone import now
+from asgiref.sync import async_to_sync
+from dotenv import load_dotenv
+load_dotenv()
+import os
+import aiohttp
+import asyncio
 
+async def send_telegram_message(chat_id, message):
+    url = f"https://api.telegram.org/bot{os.getenv('BOT_TOKEN')}/sendMessage"
+    data = {
+        "chat_id": chat_id,
+        "text": message,
+        "parse_mode": "HTML"
+    }
+    
+    async with aiohttp.ClientSession() as session: 
+        async with session.post(url, json=data) as response:
+            return await response.json()
 
 
 class ClientApiView(ListCreateAPIView):
@@ -69,7 +86,7 @@ class ClientApiView(ListCreateAPIView):
 
         client = Client.objects.create(
             chat_id=chat_id,
-            username_tg = username_tg,
+            username_tg = f"https://t.me/{username_tg}",
             phone=phone,
             queue=next_queue,
             time_is_up=time_is_up,
@@ -78,7 +95,7 @@ class ClientApiView(ListCreateAPIView):
         serialized_client = ClientSerializer(client).data 
         return Response(data={"message":"success","data":serialized_client}, status=status.HTTP_201_CREATED)
 
-class ClientRAPIView(RetrieveDestroyAPIView):
+class ClientRAPIView(RetrieveUpdateDestroyAPIView):
     queryset = Client.objects.all()
     serializer_class = ClientSerializer
     lookup_field = "chat_id"
@@ -93,7 +110,7 @@ class ClientRAPIView(RetrieveDestroyAPIView):
         except Client.DoesNotExist:  
             return Response({
                 "message": "Error",
-                "errors": ["Bunday chat_id ga iye paydalaniwshi tabilmadi"]
+                "errors": ["Bunday id ga iye paydalaniwshi tabilmadi"]
             }, status=status.HTTP_404_NOT_FOUND)
 
     def delete(self,request,*args,**kwargs):
@@ -109,9 +126,47 @@ class ClientRAPIView(RetrieveDestroyAPIView):
         except Client.DoesNotExist:
             return Response({
                 "message": "Error",
-                "errors": ["Bunday chat_id ga iye paydalaniwshi tabilmadi"]
+                "errors": ["Bunday id ga iye paydalaniwshi tabilmadi"]
             }, status=status.HTTP_404_NOT_FOUND) 
+    
+    def put(self, request, *args, **kwargs):
+        pk = kwargs.get("pk")
+        
 
+        try:
+            next_client = Client.objects.filter(is_finished=False).order_by("queue").first()
+            if not next_client or next_client.chat_id != pk:
+                return Response({
+                    "message": "Error",
+                    "errors": ["Siz Naduris Id jiberdiniz"]
+                }, status=status.HTTP_400_BAD_REQUEST)
+
+            next_client.is_finished = True
+            is_free = request.data.get("is_free", False)
+
+            if is_free:
+                next_client.price = 0
+                next_client.if_free = True
+            next_client.save()
+
+            next_in_line = Client.objects.filter(is_finished=False).order_by("queue").first()
+            if next_in_line:
+                chat_id = next_in_line.chat_id
+                message = "Sizdi nawbatiniz keldi! Tez arada kirin."
+                
+
+                async_to_sync(send_telegram_message)(chat_id, message)
+
+            return Response({
+                "message": "success",
+                "data": ClientSerializer(next_client).data
+            }, status=status.HTTP_200_OK)
+
+        except Client.DoesNotExist:
+            return Response({
+                "message": "Error",
+                "errors": ["Bunday id ga iye paydalaniwshi tabilmadi"]
+            }, status=status.HTTP_404_NOT_FOUND)
 
 class ClientYearGet(APIView):
     authentication_classes = [JWTAuthentication]
